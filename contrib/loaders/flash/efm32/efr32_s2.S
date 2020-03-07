@@ -22,7 +22,7 @@
 
 	.text
 	.syntax unified
-	.cpu cortex-m0
+	.cpu cortex-m33
 	.thumb
 	.thumb_func
 
@@ -39,12 +39,14 @@
 	 */
 
 /* offsets of registers from flash reg base */
-#define EFM32_MSC_WRITECTRL_OFFSET      0x008
-#define EFM32_MSC_WRITECMD_OFFSET       0x00c
-#define EFM32_MSC_ADDRB_OFFSET          0x010
+#define EFM32_MSC_WRITECTRL_OFFSET      0x00c
+#define EFM32_MSC_WRITECMD_OFFSET       0x010
+#define EFM32_MSC_ADDRB_OFFSET          0x014
 #define EFM32_MSC_WDATA_OFFSET          0x018
 #define EFM32_MSC_STATUS_OFFSET         0x01c
 
+   .global _start
+_start:
 	/* set WREN to 1 */
 	movs    r6, #1
 	str     r6, [r0, #EFM32_MSC_WRITECTRL_OFFSET]
@@ -59,9 +61,6 @@ wait_fifo:
 
 	/* store address in MSC_ADDRB */
 	str     r4, [r0, #EFM32_MSC_ADDRB_OFFSET]
-	/* set LADDRIM bit */
-	movs    r6, #1
-	str     r6, [r0, #EFM32_MSC_WRITECMD_OFFSET]
 	/* check status for INVADDR and/or LOCKED */
 	ldr     r6, [r0, #EFM32_MSC_STATUS_OFFSET]
 	movs    r7, #6
@@ -78,9 +77,6 @@ wait_wdataready:
 	/* load data to WDATA */
 	ldr     r6, [r5]
 	str     r6, [r0, #EFM32_MSC_WDATA_OFFSET]
-	/* set WRITEONCE bit */
-	movs    r6, #8
-	str     r6, [r0, #EFM32_MSC_WRITECMD_OFFSET]
 
 	adds    r5, #4          /* rp++ */
 	adds    r4, #4          /* target_address++ */

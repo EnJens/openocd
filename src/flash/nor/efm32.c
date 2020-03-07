@@ -55,30 +55,36 @@
 #define EFM32_MSC_DEV_INFO              (EFM32_MSC_INFO_BASE+0x8000)
 
 /* PAGE_SIZE is not present in Zero, Happy and the original Gecko MCU */
-#define EFM32_MSC_DI_PAGE_SIZE          (EFM32_MSC_DEV_INFO+0x1e7)
-#define EFM32_MSC_DI_FLASH_SZ           (EFM32_MSC_DEV_INFO+0x1f8)
-#define EFM32_MSC_DI_RAM_SZ             (EFM32_MSC_DEV_INFO+0x1fa)
-#define EFM32_MSC_DI_PART_NUM           (EFM32_MSC_DEV_INFO+0x1fc)
+#define EFM32_MSC_DI_PAGE_SIZE          (EFM32_MSC_DEV_INFO+0x08)
+#define EFM32_MSC_DI_FLASH_SZ           (EFM32_MSC_DEV_INFO+0x0c)
+#define EFM32_MSC_DI_RAM_SZ             (EFM32_MSC_DEV_INFO+0x0e)
+#define EFM32_MSC_DI_PART_NUM           (EFM32_MSC_DEV_INFO+0x06)
 #define EFM32_MSC_DI_PART_FAMILY        (EFM32_MSC_DEV_INFO+0x1fe)
-#define EFM32_MSC_DI_PROD_REV           (EFM32_MSC_DEV_INFO+0x1ff)
+#define EFM32_MSC_DI_PROD_REV           (EFM32_MSC_DEV_INFO+0x02)
 
 #define EFM32_MSC_REGBASE               0x400c0000
 #define EFM32_MSC_REGBASE_SERIES1       0x400e0000
-#define EFM32_MSC_REG_WRITECTRL         0x008
+#define EFM32_MSC_REGBASE_SERIES2       0x50030000
+#define EFM32_MSC_REG_WRITECTRL         0x00c
+#define EFM32_MSC_REG_WRITECTRL_SERIES2 0x00c
 #define EFM32_MSC_WRITECTRL_WREN_MASK   0x1
-#define EFM32_MSC_REG_WRITECMD          0x00c
+#define EFM32_MSC_REG_WRITECMD          0x010
+#define EFM32_MSC_REG_WRITECMD_SERIES2  0x010
 #define EFM32_MSC_WRITECMD_LADDRIM_MASK 0x1
 #define EFM32_MSC_WRITECMD_ERASEPAGE_MASK 0x2
 #define EFM32_MSC_WRITECMD_WRITEONCE_MASK 0x8
-#define EFM32_MSC_REG_ADDRB             0x010
+#define EFM32_MSC_REG_ADDRB             0x014
+#define EFM32_MSC_REG_ADDRB_SERIES2     0x014
 #define EFM32_MSC_REG_WDATA             0x018
 #define EFM32_MSC_REG_STATUS            0x01c
 #define EFM32_MSC_STATUS_BUSY_MASK      0x1
 #define EFM32_MSC_STATUS_LOCKED_MASK    0x2
 #define EFM32_MSC_STATUS_INVADDR_MASK   0x4
 #define EFM32_MSC_STATUS_WDATAREADY_MASK 0x8
-#define EFM32_MSC_STATUS_WORDTIMEOUT_MASK 0x10
-#define EFM32_MSC_STATUS_ERASEABORTED_MASK 0x20
+#define EFM32_MSC_STATUS_WORDTIMEOUT_MASK 0x40
+#define EFM32_MSC_STATUS_WORDTIMEOUT_MASK_SERIES2 0x40
+#define EFM32_MSC_STATUS_ERASEABORTED_MASK 0x10
+#define EFM32_MSC_STATUS_ERASEABORTED_MASK_SERIES2 0x10
 #define EFM32_MSC_REG_LOCK              0x03c
 #define EFM32_MSC_REG_LOCK_SERIES1      0x040
 #define EFM32_MSC_LOCK_LOCKKEY          0x1b71
@@ -172,6 +178,7 @@ static const struct efm32_family_data efm32_families[] = {
 		{ 120, "EZR32WG Wonder", .series = 0 },
 		{ 121, "EZR32LG Leopard", .series = 0 },
 		{ 122, "EZR32HG Happy", .series = 0, .page_size = 1024 },
+        { 128, "EFR32MG Series W", .series = 2, .page_size = 8192 },
 };
 
 
@@ -240,6 +247,8 @@ static int efm32x_read_info(struct flash_bank *bank,
 		/* Cortex-M4 device (WONDER GECKO) */
 	} else if (((cpuid >> 4) & 0xfff) == 0xc60) {
 		/* Cortex-M0+ device */
+	} else if (((cpuid >> 4) & 0xfff) == 0xd21) {
+		/* Cortex-M33 device */
 	} else {
 		LOG_ERROR("Target is not Cortex-Mx Device");
 		return ERROR_FAIL;
@@ -284,6 +293,9 @@ static int efm32x_read_info(struct flash_bank *bank,
 			efm32x_info->reg_base = EFM32_MSC_REGBASE_SERIES1;
 			efm32x_info->reg_lock = EFM32_MSC_REG_LOCK_SERIES1;
 			break;
+        case 2:
+			efm32x_info->reg_base = EFM32_MSC_REGBASE_SERIES2;
+			efm32x_info->reg_lock = EFM32_MSC_REG_LOCK;
 	}
 
 	if (efm32_info->family_data->msc_regbase != 0)
@@ -661,72 +673,9 @@ static int efm32x_write_block(struct flash_bank *bank, const uint8_t *buf,
 	struct efm32x_flash_bank *efm32x_info = bank->driver_priv;
 	int ret = ERROR_OK;
 
-	/* see contrib/loaders/flash/efm32.S for src */
+	/* see contrib/loaders/flash/efm32/efm32.S for src */
 	static const uint8_t efm32x_flash_write_code[] = {
-		/* #define EFM32_MSC_WRITECTRL_OFFSET      0x008 */
-		/* #define EFM32_MSC_WRITECMD_OFFSET       0x00c */
-		/* #define EFM32_MSC_ADDRB_OFFSET          0x010 */
-		/* #define EFM32_MSC_WDATA_OFFSET          0x018 */
-		/* #define EFM32_MSC_STATUS_OFFSET         0x01c */
-
-			0x01, 0x26,    /* movs    r6, #1 */
-			0x86, 0x60,    /* str     r6, [r0, #EFM32_MSC_WRITECTRL_OFFSET] */
-
-		/* wait_fifo: */
-			0x16, 0x68,    /* ldr     r6, [r2, #0] */
-			0x00, 0x2e,    /* cmp     r6, #0 */
-			0x22, 0xd0,    /* beq     exit */
-			0x55, 0x68,    /* ldr     r5, [r2, #4] */
-			0xb5, 0x42,    /* cmp     r5, r6 */
-			0xf9, 0xd0,    /* beq     wait_fifo */
-
-			0x04, 0x61,    /* str     r4, [r0, #EFM32_MSC_ADDRB_OFFSET] */
-			0x01, 0x26,    /* movs    r6, #1 */
-			0xc6, 0x60,    /* str     r6, [r0, #EFM32_MSC_WRITECMD_OFFSET] */
-			0xc6, 0x69,    /* ldr     r6, [r0, #EFM32_MSC_STATUS_OFFSET] */
-			0x06, 0x27,    /* movs    r7, #6 */
-			0x3e, 0x42,    /* tst     r6, r7 */
-			0x16, 0xd1,    /* bne     error */
-
-		/* wait_wdataready: */
-			0xc6, 0x69,    /* ldr     r6, [r0, #EFM32_MSC_STATUS_OFFSET] */
-			0x08, 0x27,    /* movs    r7, #8 */
-			0x3e, 0x42,    /* tst     r6, r7 */
-			0xfb, 0xd0,    /* beq     wait_wdataready */
-
-			0x2e, 0x68,    /* ldr     r6, [r5] */
-			0x86, 0x61,    /* str     r6, [r0, #EFM32_MSC_WDATA_OFFSET] */
-			0x08, 0x26,    /* movs    r6, #8 */
-			0xc6, 0x60,    /* str     r6, [r0, #EFM32_MSC_WRITECMD_OFFSET] */
-
-			0x04, 0x35,    /* adds    r5, #4 */
-			0x04, 0x34,    /* adds    r4, #4 */
-
-		/* busy: */
-			0xc6, 0x69,    /* ldr     r6, [r0, #EFM32_MSC_STATUS_OFFSET] */
-			0x01, 0x27,    /* movs    r7, #1 */
-			0x3e, 0x42,    /* tst     r6, r7 */
-			0xfb, 0xd1,    /* bne     busy */
-
-			0x9d, 0x42,    /* cmp     r5, r3 */
-			0x01, 0xd3,    /* bcc     no_wrap */
-			0x15, 0x46,    /* mov     r5, r2 */
-			0x08, 0x35,    /* adds    r5, #8 */
-
-		/* no_wrap: */
-			0x55, 0x60,    /* str     r5, [r2, #4] */
-			0x01, 0x39,    /* subs    r1, r1, #1 */
-			0x00, 0x29,    /* cmp     r1, #0 */
-			0x02, 0xd0,    /* beq     exit */
-			0xdb, 0xe7,    /* b       wait_fifo */
-
-		/* error: */
-			0x00, 0x20,    /* movs    r0, #0 */
-			0x50, 0x60,    /* str     r0, [r2, #4] */
-
-		/* exit: */
-			0x30, 0x46,    /* mov     r0, r6 */
-			0x00, 0xbe,    /* bkpt    #0 */
+#include "../../../contrib/loaders/flash/efm32/efr32_s2.inc"
 	};
 
 
@@ -737,10 +686,13 @@ static int efm32x_write_block(struct flash_bank *bank, const uint8_t *buf,
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	}
 
+    LOG_INFO("Writing flash buffer to address 0x%08lx", write_algorithm->address);
 	ret = target_write_buffer(target, write_algorithm->address,
 			sizeof(efm32x_flash_write_code), efm32x_flash_write_code);
-	if (ret != ERROR_OK)
+	if (ret != ERROR_OK) {
+        LOG_ERROR("Error writing flash code: %d", ret);
 		return ret;
+    }
 
 	/* memory buffer */
 	while (target_alloc_working_area_try(target, buffer_size, &source) != ERROR_OK) {
@@ -755,6 +707,7 @@ static int efm32x_write_block(struct flash_bank *bank, const uint8_t *buf,
 			return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 		}
 	}
+    LOG_INFO("Preparing target registers: r0=0x%08X, r1=0x%08X, r2=0x%lX, r3=0x%lX, r4=0x%08X", efm32x_info->reg_base, count, source->address, source->address + source->size, address);
 
 	init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT);	/* flash base (in), status (out) */
 	init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);	/* count (word-32bit) */
@@ -770,6 +723,7 @@ static int efm32x_write_block(struct flash_bank *bank, const uint8_t *buf,
 
 	armv7m_info.common_magic = ARMV7M_COMMON_MAGIC;
 	armv7m_info.core_mode = ARM_MODE_THREAD;
+    LOG_INFO("Running flash algo");
 
 	ret = target_run_flash_async_algorithm(target, buf, count, 4,
 			0, NULL,
@@ -777,7 +731,7 @@ static int efm32x_write_block(struct flash_bank *bank, const uint8_t *buf,
 			source->address, source->size,
 			write_algorithm->address, 0,
 			&armv7m_info);
-
+    LOG_INFO("Flash result: %d", ret);
 	if (ret == ERROR_FLASH_OPERATION_FAILED) {
 		LOG_ERROR("flash write failed at address 0x%"PRIx32,
 				buf_get_u32(reg_params[4].value, 0, 32));
@@ -831,10 +785,10 @@ static int efm32x_write_word(struct flash_bank *bank, uint32_t addr,
 	if (ERROR_OK != ret)
 		return ret;
 
-	ret = efm32x_set_reg_bits(bank, EFM32_MSC_REG_WRITECMD,
+/*	ret = efm32x_set_reg_bits(bank, EFM32_MSC_REG_WRITECMD,
 		EFM32_MSC_WRITECMD_LADDRIM_MASK, 1);
 	if (ERROR_OK != ret)
-		return ret;
+		return ret;*/
 
 	ret = efm32x_read_reg_u32(bank, EFM32_MSC_REG_STATUS, &status);
 	if (ERROR_OK != ret)
@@ -885,7 +839,7 @@ static int efm32x_write(struct flash_bank *bank, const uint8_t *buffer,
 {
 	struct target *target = bank->target;
 	uint8_t *new_buffer = NULL;
-
+    LOG_INFO("writing %" PRIu32 " bytes to %" PRIu32, count, offset);
 	if (target->state != TARGET_HALTED) {
 		LOG_ERROR("Target not halted");
 		return ERROR_TARGET_NOT_HALTED;
@@ -914,15 +868,19 @@ static int efm32x_write(struct flash_bank *bank, const uint8_t *buffer,
 
 	uint32_t words_remaining = count / 4;
 	int retval, retval2;
-
+    LOG_INFO("Unlocking flash and setting WREN");
 	/* unlock flash registers */
 	efm32x_msc_lock(bank, 0);
 	retval = efm32x_set_wren(bank, 1);
-	if (retval != ERROR_OK)
+	if (retval != ERROR_OK) {
+        LOG_ERROR("Unable to set WREN");
 		goto cleanup;
+    }
 
 	/* try using a block write */
-	retval = efm32x_write_block(bank, buffer, offset, words_remaining);
+    LOG_INFO("Calling write_block");
+  	retval = efm32x_write_block(bank, buffer, offset, words_remaining);
+    LOG_INFO("write_block retval: %d", retval);
 
 	if (retval == ERROR_TARGET_RESOURCE_NOT_AVAILABLE) {
 		/* if block write failed (no sufficient working area),
